@@ -1,138 +1,212 @@
-require('dotenv').config();
-const axios = require('axios');
-const { SERVER_ADDRESS = 'http://localhost:', PORT = 3000 } = process.env;
-const API_URL = process.env.API_URL || SERVER_ADDRESS + PORT;
+process.env.NODE_ENV === 'development' && require('dotenv').config();
 
-const { rebuildDB } = require('../db/seed_data');
+const axios = require('axios');
+const { handle } = require('../index');
 const { client } = require('../db');
+const { rebuildDB } = require('../db/seed_data');
+
+const { SERVER_ADDRESS = 'http://localhost:', PORT = 3000 } = process.env;
+const API_URL = process.env.API_URL || SERVER_ADDRESS + PORT + '/api';
+
+beforeAll(async () => {
+  await rebuildDB();
+  await apiSetup();
+});
+
+afterAll(async () => {
+  await client.end();
+  handle.close();
+});
 
 const apiSetup = async () => {
-  const reportsToCreate = [
-    { title: "floating patronus", location: 'hogwarts', description: 'it seemed to have somewhat of a glow to it', password: 'ExpectoPatronum' }
-  ]
-  const reportsCreatedDirectly = await Promise.all(reportsToCreate.map(async ({title, location, description, password}) => {
-    const {rows: [reportCreated]} = await client.query(`
-      INSERT INTO reports (title, location, description, password, "isOpen") VALUES ($1, $2, $3, $4, true)
-      RETURNING *
-    `, [title, location, description, password]);
-    delete reportCreated.password;
-    return reportCreated;
-  }));
-}
+  const reports = [
+    {
+      title: 'floating patronus',
+      location: 'hogwarts',
+      description: 'it seemed to have somewhat of a glow to it',
+      password: 'ExpectoPatronum',
+    },
+  ];
 
-describe('API', () => {
-  const reportToPost = { title: "Disappearing Being", location: 'Middle Earth', description: 'the little fellow put on a ring, and i swear he disappeared', password: 'FrodoIsMysterious' };
-  const commentFieldsToPost = { content: 'he is quite small to hold the one ring to rule them all...' };
-  let postedReportResponse, postedCommentResponse;
-  beforeAll(async() => {
-    await client.connect();
-    await rebuildDB();
-    await apiSetup();
-  })
-  afterAll(async() => {
-    await client.end();
-  })
-  describe('server', () => {
-    beforeAll(async() => {
-    })
-    it('Responds to requests', async () => {
-      await expect(axios.get(`${API_URL}/foo-bar`)).rejects.toThrow('Request failed with status code 404');
+  for (let i = 0; i < reports.length; i++) {
+    const { title, location, description, password } = reports[i];
+
+    await client.query(
+      `
+      INSERT INTO reports (title, location, description, password, "isOpen")
+      VALUES ($1, $2, $3, $4, 'true');   
+    `,
+      [title, location, description, password]
+    );
+  }
+};
+
+describe('API unit tests', () => {
+  describe('GET /api/reports', () => {
+    test('GET /api/reports returns an array of reports', async () => {
+      const {
+        data: { reports },
+      } = await axios.get(`${API_URL}/reports`);
+
+      expect(Array.isArray(reports)).toBe(true);
+      expect(reports.length).toBe(1);
+      expect(reports[0].title).toEqual('floating patronus');
     });
-  });
-  describe('GET request for /api/reports', () => {
-    let response, allReportsResponse, allReportsQueried, singleReportResponse, singleReportQueried;
-    beforeAll(async() => {
-      const {data} = await axios.get(`${API_URL}/api/reports`);
-      response = data;
-      const {rows} = await client.query(`
-        SELECT * FROM reports
-        WHERE "isOpen" = true;
+
+    test('GET /api/reports endpoint should return the same reports as those fetched directly from the database', async () => {
+      const {
+        data: { reports: fetchedReports },
+      } = await axios.get(`${API_URL}/reports`);
+
+      const { rows: reportsFromDB } = await client.query(`
+        SELECT * FROM reports;
       `);
-      allReportsQueried = rows;
-      allReportsResponse = response.reports;
-      [singleReportResponse] = allReportsResponse;
-      [singleReportQueried] = allReportsQueried;
-    })
-    it('Responds with an object with property, `reports`, which is an array.', async () => {
-      expect(response).toEqual(expect.objectContaining({
-        reports: expect.any(Array),
-      }));
-    });
-    it('reports array should have all open reports', async () => {
-      expect(allReportsResponse.length).toBe(allReportsQueried.length);
-    });
-    it('reports should reflect those in the database', async () => {
-      expect(singleReportResponse).toEqual(expect.objectContaining({
-        id: expect.any(Number),
-        title: expect.any(String),
-        location: expect.any(String),
-        description: expect.any(String),
-        isOpen: expect.any(Boolean),
-      }));
-      expect(singleReportResponse.description).toEqual(singleReportQueried.description);
-      expect(singleReportResponse.title).toEqual(singleReportQueried.title);
-      expect(singleReportResponse.location).toEqual(singleReportQueried.location);
-    });
-  });
-  describe('POST request for /api/reports', () => {
-    beforeAll(async() => {
-    })
-    it('on caught error, call next(error), which sends back a 500 error', async () => {
-      await expect(axios.post(`${API_URL}/api/reports`, {nothing: undefined})).rejects.toThrow('Request failed with status code 500');
-    });
-    it('on success, it should send back the object returned by createReport', async () => {
-      const {data} = await axios.post(`${API_URL}/api/reports`, reportToPost);
-      postedReportResponse = data;
-      expect(postedReportResponse.title).toBe(reportToPost.title);
-      expect(postedReportResponse.description).toBe(reportToPost.description);
-    });
-  });
-  describe('POST request for /api/reports/:reportId/comments', () => {
-    beforeAll(async() => {
-    })
-    it('on caught error, call next(error), which sends back a 500 error', async () => {
-      await expect(axios.post(`${API_URL}/api/reports/${2300}/comments`, {nothing: undefined})).rejects.toThrow('Request failed with status code 500');
-    });
-    it('on success, it should send back the object returned by createReportComment', async () => {
-      const {data, status} = await axios.post(`${API_URL}/api/reports/${postedReportResponse.id}/comments`, commentFieldsToPost);
-      postedCommentResponse = data;
-      expect(status).toBe(200);
-      expect(postedCommentResponse.content).toBe(commentFieldsToPost.content);
-    });
-  });
-  describe('DELETE request for /api/reports/:reportId', () => {
-    let deleteResponse;
-    beforeAll(async() => {
-    })
-    it('on caught error, call next(error), which sends back a 500 error', async () => {
-      await expect(axios.delete(`${API_URL}/api/reports/${2300}`)).rejects.toThrow('Request failed with status code 500');
-    });
-    it('it should await a call to closeReport, passing in the reportId from req.params and the password from req.body', async () => {
-      const {data, status} = await axios({
-        method: 'delete',
-        url: `${API_URL}/api/reports/${postedReportResponse.id}`,
-        data: {password: reportToPost.password}
-      });
-      deleteResponse = data;
 
-      const {rows: [report]} = await client.query(`
+      expect(reportsFromDB.length).toEqual(fetchedReports.length);
+
+      const firstDBReport = reportsFromDB[0];
+      const firstFetchedReport = fetchedReports[0];
+      firstDBReport.expirationDate = firstFetchedReport.expirationDate;
+
+      Object.keys(firstDBReport).forEach((key) => {
+        if (firstFetchedReport.hasOwnProperty(key)) {
+          expect(firstDBReport[key]).toEqual(firstFetchedReport[key]);
+        }
+      });
+    });
+  });
+
+  // we're defining this newReportId in the parent scope to any individual test,
+  // so that other tests can assign and consume the value later
+  // why would we do this? (hint: what if we want to use data
+  // from the newReport object outside the scope in which it was created...?)
+  let newReportId;
+
+  describe('POST /api/reports', () => {
+    test('POST /api/reports without proper fields throws and yields a response status of 500', async () => {
+      try {
+        const response = await axios.post(`${API_URL}/reports`, {
+          pizza: 'party',
+        });
+      } catch (err) {
+        expect(err.response.status).toBe(500);
+      }
+    });
+
+    test('POST /api/reports with proper report object creates and returns the report', async () => {
+      const newReport = {
+        title: 'Disappearing Being',
+        location: 'Middle Earth',
+        description:
+          'the little fellow put on a ring, and i swear he disappeared',
+        password: 'FrodoIsMysterious',
+      };
+
+      const { data: createdReport } = await axios.post(
+        `${API_URL}/reports`,
+        newReport
+      );
+
+      // store id for subsequent comments association below!
+      newReportId = createdReport.id;
+
+      expect(createdReport.title).toBe(newReport.title);
+      expect(createdReport.isOpen).toBe(true);
+      expect(createdReport.password).toBe(undefined);
+    });
+
+    test('POST /api/reports/:reportId/comments throws error with status 500 if comment object is malformed', async () => {
+      try {
+        await axios.post(`${API_URL}/reports/1/comments`, { pizza: 'party' });
+      } catch (err) {
+        expect(err.response.status).toBe(500);
+      }
+    });
+
+    test('POST /api/reports/:reportId/comments supplied with proper comment data creates a new comment associated with the new report created above', async () => {
+      const newComment = {
+        content: 'he is quite small to hold the one ring to rule them all...',
+      };
+
+      const { data: comment, status } = await axios.post(
+        `${API_URL}/reports/${newReportId}/comments`,
+        newComment
+      );
+
+      expect(comment.content).toBe(newComment.content);
+      expect(status).toBe(200);
+    });
+  });
+
+  describe('DELETE /api/reports', () => {
+    test('DELETE /api/reports/:reportId throws an error with status 500 if reportId is undefined or not found, or if password is not supplied', async () => {
+      try {
+        await axios({
+          method: 'delete',
+          url: `${API_URL}/reports/pizza`,
+          data: {
+            password: 'FrodoIsMysterious',
+          },
+        });
+      } catch (err) {
+        expect(err.response.status).toBe(500);
+      }
+
+      try {
+        await axios({
+          method: 'delete',
+          url: `${API_URL}/reports/${newReportId}`,
+          data: {
+            password: 'MyPrecious',
+          },
+        });
+      } catch (err) {
+        expect(err.response.status).toBe(500);
+      }
+    });
+
+    test('DELETE /api/reports/:reportId succeeds with a well defined reportId and matching db record', async () => {
+      const { data: deleteResponse, status } = await axios({
+        method: 'delete',
+        url: `${API_URL}/reports/${newReportId}`,
+        data: {
+          password: 'FrodoIsMysterious',
+        },
+      });
+
+      const {
+        rows: [softDeletedReport],
+      } = await client.query(
+        `
       SELECT * FROM reports
       WHERE id=$1;
-    `,[postedReportResponse.id]);
-      
+    `,
+        [newReportId]
+      );
+
       expect(status).toBe(200);
-      expect(report.isOpen).toBe(false);
-    });
-    it('On success, it should send back the object returned by closeReport', async () => {
-      expect(deleteResponse).toEqual({message: 'Report successfully closed!'});
+      expect(softDeletedReport.isOpen).toBe(false);
+      expect(deleteResponse.message).toBe('Report successfully closed!');
     });
   });
-  describe('Properly handles Not Found requests', () => {
-    beforeAll(async() => {
-    })
-    it('Sends back 404 not found', async () => {
-      await expect(axios.get(`${API_URL}/foo-bar`)).rejects.toThrow('Request failed with status code 404');
+
+  describe('404 handling', () => {
+    test('the api handles not found requests', async () => {
+      try {
+        await axios.get(`${API_URL}/pizza`);
+      } catch (err) {
+        expect(err.response.status).toBe(404);
+        expect(err.response.statusText).toBe('Not Found');
+      }
     });
   });
-  
 });
+
+
+
+
+
+
+
+
+
