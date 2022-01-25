@@ -25,13 +25,13 @@ const { getOpenReports,
  * - on caught error, call next(error)
  */
 
-apiRouter.get('/reports', async (req, res, next) => {
+apiRouter.get('/reports', async (err, req, res, next) => {
 
     try {
         let theReports = await getOpenReports()
 
         res.send({ reports: theReports })
-    } catch (err) {
+    } catch (error) {
         next(err)
     }
 })
