@@ -25,13 +25,13 @@ const { getOpenReports,
  * - on caught error, call next(error)
  */
 
-apiRouter.get('/reports', async (err, req, res, next) => {
+apiRouter.get('/reports', async (req, res, next) => {
 
     try {
         let theReports = await getOpenReports()
 
         res.send({ reports: theReports })
-    } catch (error) {
+    } catch (err) {
         next(err)
     }
 })
@@ -72,8 +72,8 @@ apiRouter.post('/reports', async (req, res, next) => {
 apiRouter.delete('/reports/:reportId', async (req, res, next) => {
     try {
         const { password } = req.body;
-        const { reportId } = req.params;
-        const messageObj = await closeReport(reportId, password);
+        // const { reportId } = req.params;
+        const messageObj = await closeReport(req.params.reportId, password);
         res.send(messageObj);
 
     } catch (err) {
@@ -94,10 +94,11 @@ apiRouter.delete('/reports/:reportId', async (req, res, next) => {
 apiRouter.post('/reports/:reportId/comments', async (req, res, next) => {
     try {
         const { content } = req.body;
+        // console.log(content, req.body)
         const newCommentFields = { content };
-        const reportId = req.params;
+        // console.log(newCommentFields)
 
-        const comment = await createReportComment(reportId, newCommentFields, content);
+        const comment = await createReportComment(req.params.reportId, newCommentFields, content);
 
         res.send(comment);
     } catch (err) {

@@ -36,6 +36,8 @@ async function getOpenReports() {
     //    you can use Date.parse(report.expirationDate) < new Date()
     // also, remove the password from all reports
     // finally, return the reports
+    console.log(Array.isArray(openReports))
+
     return openReports;
   } catch (error) {
     throw error;
