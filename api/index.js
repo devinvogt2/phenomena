@@ -32,7 +32,7 @@ apiRouter.get('/reports', async (req, res, next) => {
 
         res.send({ reports: theReports })
     } catch (err) {
-        next(error)
+        next(err)
     }
 })
 
